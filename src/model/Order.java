@@ -14,6 +14,10 @@ public class Order {
         this.identifier = identifier;
     }
 
+    public Order(Order order) {
+        this(order.getUnits(), order.getValue(), order.getIdentifier());
+    }
+
     public BigDecimal getUnits() {
         return units;
     }

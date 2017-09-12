@@ -2,15 +2,17 @@ package controller;
 
 import model.Customer;
 import model.Order;
+import model.SaxosReceipt;
 
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
+
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toMap;
 
 public class CustomerController {
     OrderController orderController;
@@ -156,13 +158,123 @@ public class CustomerController {
      *
      */
     public void settleAllCustomersTransactions() throws Exception{
-        for (Customer x: customerMap.values()){
-            List<Order> orders = x.getTransactions();
-            for (Order o: orders){
-                x.completeTransaction(o);
+        List<Order> orders = new ArrayList<>();
+        Map<String, List<Order>> ordersByCustomer = new HashMap<>();
+
+        // combine
+        for (Customer x: customerMap.values()) {
+            for (Order order: x.getTransactions()) {
+                if (orderExists(order, orders)) {
+                    combineOrder(order, orders);
+                }
+                else {
+                    orders.add(new Order(order));
+                }
+            }
+        }
+        Collections.sort(orders, (o1, o2) -> o1.getIdentifier().compareTo(o2.getIdentifier()));
+        System.out.println("Combined:\t" + orders);
+
+        // remove fraction
+        List<Order> refinedOrders = new ArrayList<>();
+        for (Order order: orders) {
+            BigDecimal units = order.getUnits();
+            Order o = order;
+            BigDecimal fraction = BigDecimal.ZERO;
+            if (hasFraction(units)) {
+                fraction = units.remainder(BigDecimal.ONE);
+                BigDecimal completeUnits = order.getUnits().subtract(fraction);
+                o = new Order(completeUnits, order.getValue(), order.getIdentifier());
+            }
+            refinedOrders.add(o);
+
+            // calculate the actual amount of units purchased by each customer
+            // by distributing the fraction equally
+            List<Customer> customers = whoOrdered(order, customerMap.values());
+            BigDecimal toDeduct = fraction.divide(BigDecimal.valueOf(customers.size()), 5, BigDecimal.ROUND_HALF_UP);
+            for (Customer customer: customers) {
+                List<Order> customerOrders = new ArrayList<>();
+                if (ordersByCustomer.containsKey(customer.getName())) {
+                    customerOrders = ordersByCustomer.get(customer.getName());
+                }
+                Optional<Order> pendingTransaction = customer.findPendingTransaction(order.getIdentifier());
+                if (pendingTransaction.isPresent()) {
+                    Order original = pendingTransaction.get();
+                    BigDecimal purchasedUnits = original.getUnits().subtract(toDeduct);
+                    customerOrders.add(new Order(purchasedUnits, original.getValue(), original.getIdentifier()));
+                    ordersByCustomer.put(customer.getName(), customerOrders);
+                }
+            }
+        }
+        System.out.println("To Saxos:\t" + refinedOrders);
+
+        // send
+        List<SaxosReceipt> receipts = saxosController.processOrder(refinedOrders);
+
+        System.out.println("From Saxos:\t" + receipts);
+
+        // ignore this tiny monster
+        Map<String, List<Order>> originalOrders = customerMap.values()
+                                                             .stream()
+                                                             .collect(toMap(Customer::getName,
+                                                                 c -> c.getTransactions()
+                                                                       .stream()
+                                                                       .sorted((o1, o2) -> o1.getIdentifier().compareTo(o2.getIdentifier()))
+                                                                       .collect(toList())));
+        System.out.println("Original/Cust:\t" + originalOrders);
+        System.out.println("Actual/Cust:\t" + ordersByCustomer);
+
+        // calculate return percentage per customer
+        for (SaxosReceipt receipt : receipts) {
+            String orderId = receipt.getIdentifier();
+            BigDecimal pricePerUnit = receipt.getTotalValue().divide(receipt.getTotalUnits(), 5, BigDecimal.ROUND_HALF_UP);
+            for (Customer customer: customerMap.values()) {
+                String customerId = customer.getName();
+
+                Optional<Order> purchased = findPurchased(orderId, ordersByCustomer.get(customerId));
+                if (purchased.isPresent()) {
+                    BigDecimal share = pricePerUnit.multiply(purchased.get().getUnits());
+                    Order completedOrder = new Order(purchased.get().getUnits(), share, orderId);
+                    customer.completeTransaction(completedOrder);
+                }
             }
         }
     }
 
+    private Optional<Order> findPurchased(String orderId, List<Order> customerOrders) {
+        return customerOrders.stream()
+                             .filter(o -> o.getIdentifier().equals(orderId))
+                             .findFirst();
+    }
 
+    private List<Customer> whoOrdered(Order order, Collection<Customer> customers) {
+        return customers.stream()
+                        .filter(customer -> customer.getTransactions()
+                                                    .stream()
+                                                    .filter(o -> o.getIdentifier().equals(order.getIdentifier()))
+                                                    .findFirst().isPresent()
+                        )
+                        .collect(toList());
+    }
+
+    private boolean orderExists(Order order, List<Order> orders) {
+        for (Order existing: orders) {
+            if (existing.getIdentifier().equals(order.getIdentifier())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void combineOrder(Order order, List<Order> orders) {
+      if (order.getUnits().compareTo(BigDecimal.ZERO) != 0) {
+          orders.stream()
+                .filter(o -> o.getIdentifier().equals(order.getIdentifier()))
+                .forEach(o -> o.setUnits(o.getUnits().add(order.getUnits())));
+      }
+    }
+
+    private boolean hasFraction(BigDecimal bd) {
+        return !(bd.signum() == 0 || bd.scale() <= 0 || bd.stripTrailingZeros().scale() <= 0);
+    }
 }
