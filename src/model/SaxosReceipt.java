@@ -36,4 +36,8 @@ public class SaxosReceipt {
     public void setTotalUnits(BigDecimal totalUnits) {
         this.totalUnits = totalUnits;
     }
+
+    public String toString (){
+        return identifier + "|" + totalUnits.toString() + "|" + totalValue.toString();
+    }
 }

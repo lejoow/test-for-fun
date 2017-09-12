@@ -29,6 +29,10 @@ public class CustomerControllerTest {
         BigDecimal totalDerivatives = customerController.getCustomersTotalDerivatives();
         BigDecimal cash = customerController.getCustomersTotalCash();
 
+        System.out.println(totalAum);
+        System.out.println(totalDerivatives);
+        System.out.println(cash);
+
         // Then
         assertEquals(0, totalAum.compareTo(totalDerivatives.add(cash)));
         assertEquals(0, totalAum.compareTo(BigDecimal.valueOf(12716.0344)));
@@ -48,6 +52,10 @@ public class CustomerControllerTest {
 
         //Make sure that no customers have any derivatives that have negative units
         assert(customerController.allCustomersPositiveDerivative());
+
+        System.out.println(totalAum);
+        System.out.println(totalDerivatives);
+        System.out.println(cash);
 
         //Make sure that the math makes sense
         assertEquals(0, totalAum.compareTo(totalDerivatives.add(cash)));

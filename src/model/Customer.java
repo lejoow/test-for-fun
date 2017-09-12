@@ -3,6 +3,7 @@ package model;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 public class Customer {
     private String name;
@@ -73,6 +74,13 @@ public class Customer {
 
     public void addTransactions(Order x){
         this.transactions.add(x);
+    }
+
+    public Optional<Order> findPendingTransaction(String id) {
+        return this.transactions
+            .stream()
+            .filter(order -> order.getIdentifier().equals(id))
+            .findFirst();
     }
 
     public void updateOrderValue(String name, BigDecimal value){
